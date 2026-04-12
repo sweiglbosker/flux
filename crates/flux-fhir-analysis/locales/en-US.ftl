@@ -163,7 +163,7 @@ fhir_analysis_definition_cycle =
 fhir_analysis_assoc_item_not_found =
     associated {$tag} not found
     .label = cannot resolve this associated {$tag}
-    .note = Flux cannot resolved associated {$tag}s if they are defined in a super trait
+    .note = Flux cannot resolve associated {$tag}s if they are defined in a super trait
 
 fhir_analysis_ambiguous_assoc_item =
     ambiguous associated {$tag} `{$name}`
@@ -293,7 +293,7 @@ fhir_analysis_expected_type =
 
 fhir_analysis_fail_to_match_predicates =
     cannot determine corresponding unrefined predicate
-    .note = you can only add a refined predicate if an corresponding unrefined one exists
+    .note = you can only add a refined predicate if a corresponding unrefined one exists
 
 fhir_analysis_invalid_res =
     {$res_descr} not allowed in this position
