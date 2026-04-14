@@ -1631,7 +1631,9 @@ impl<'ck, 'genv, 'tcx, M: Mode> Checker<'ck, 'genv, 'tcx, M> {
                     (Uint!(uint_ty, idx), RustTy::Int(int_ty)) => {
                         uint_int_cast(idx, *uint_ty, *int_ty)
                     }
-                    (Int!(_, _), RustTy::Uint(uint_ty)) => Ty::uint(*uint_ty),
+                    (Int!(int_ty, idx), RustTy::Uint(uint_ty)) => {
+                        int_uint_cast(idx, *int_ty, *uint_ty)
+                    }
                     (TyKind::Discr(adt_def, _), RustTy::Int(int_ty)) => {
                         Self::discr_to_int_cast(adt_def, BaseTy::Int(*int_ty))
                     }
@@ -2289,6 +2291,21 @@ fn uint_int_cast(idx: &Expr, uint_ty: UintTy, int_ty: IntTy) -> Ty {
     } else {
         Ty::int(int_ty)
     }
+}
+
+fn int_uint_cast(idx: &Expr, int_ty: IntTy, uint_ty: UintTy) -> Ty {
+    let non_neg = Expr::ge(idx.clone(), Expr::zero());
+
+    let guard: Expr = if int_bit_width(int_ty) <= uint_bit_width(uint_ty) {
+        non_neg
+    } else {
+        // Cast is still possible if the value is known to fit.
+        let fits = Expr::le(idx.clone(), Expr::uint_max(uint_ty));
+        Expr::and(non_neg, fits)
+    };
+
+    let eq = Expr::eq(Expr::nu(), idx.clone());
+    Ty::exists_with_constr(BaseTy::Uint(uint_ty), Expr::implies(guard, eq))
 }
 
 fn guarded_uint_ty(idx: &Expr, uint_ty: UintTy) -> Ty {
