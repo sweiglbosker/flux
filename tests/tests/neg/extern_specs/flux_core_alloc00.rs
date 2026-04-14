@@ -7,9 +7,6 @@ use flux_rs::assert;
 struct Foo(u8);
 struct Zst;
 
-// https://github.com/flux-rs/flux/issues/1558
-const ISIZE_MAX: usize = (1 << (isize::BITS - 1)) - 1;
-
 pub fn test_layout_new() {
     let x = Layout::new::<Foo>();
     let y = Layout::new::<u16>();
@@ -31,13 +28,13 @@ pub unsafe fn test_from_zero_align() -> Layout {
 
 pub unsafe fn test_from_size_overflow() -> Layout {
     // size, when rounded up to the nearest multiple of alignment, must not overflow isize.
-    Layout::from_size_align_unchecked(ISIZE_MAX - 2, 4) //~ ERROR refinement type
+    Layout::from_size_align_unchecked(isize::MAX as usize - 2, 4) //~ ERROR refinement type
 }
 
 pub fn test_from_valid() {
     assert(Layout::from_size_align(4, 4).is_err()); //~ ERROR refinement type
     assert(Layout::from_size_align(0, 8).is_err()); //~ ERROR refinement type
-    assert(Layout::from_size_align(ISIZE_MAX - 7, 8).is_err()); //~ ERROR refinement type
+    assert(Layout::from_size_align(isize::MAX as usize - 7, 8).is_err()); //~ ERROR refinement type
 }
 
 pub fn test_from_invalid() {
@@ -46,7 +43,7 @@ pub fn test_from_invalid() {
     // align must not be zero
     assert(Layout::from_size_align(4, 0).is_ok()); //~ ERROR refinement type
     // size, when rounded up to the nearest multiple of alignment, must not overflow isize.
-    assert(Layout::from_size_align(ISIZE_MAX - 2, 3).is_ok()); //~ ERROR refinement type
+    assert(Layout::from_size_align(isize::MAX as usize - 2, 3).is_ok()); //~ ERROR refinement type
 }
 
 pub fn test_array() {
