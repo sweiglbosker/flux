@@ -3,8 +3,19 @@
     fn pow2bv(x: bitvec<64>) -> bool {
         bv_and(x, bv_sub(x, bv_int_to_bv64(1))) == bv_int_to_bv64(0)
     }
+    // For a layout to be valid, align must be a power of two and size must not overflow
+    // isize when rounded up to the nearest multiple of align.
+    //
+    // The rounding formula `(size + align - 1) & !(align - 1)` is maximized when just past the
+    // alignment boundary, and thus bounded by `size + align - 1`.
+    // See: https://github.com/rust-lang/rust/blob/dab8d9d1066c4c95008163c7babf275106ce3f32/library/core/src/alloc/layout.rs#L80-L93
     fn is_valid_layout(s: int, a: int) -> bool {
         (s + a - 1 <= isize::MAX) && a > 0 && pow2(a)
+    }
+
+    // See: https://github.com/rust-lang/rust/blob/dab8d9d1066c4c95008163c7babf275106ce3f32/library/core/src/alloc/layout.rs#L559-L589
+    fn is_valid_array_layout(n: int, size: int, align: int) -> bool {
+        size == 0 || is_valid_layout(size * n, align)
     }
 )]
 
@@ -47,7 +58,7 @@ impl Layout {
     // Core impl: https://github.com/rust-lang/rust/blob/dab8d9d1066c4c95008163c7babf275106ce3f32/library/core/src/alloc/layout.rs#L559-L589
     #[no_panic]
     #[spec(fn(n: usize) -> Result<Self[n * T::size_of(), T::align_of()],_>[
-        T::size_of() == 0 || n * T::size_of() + T::align_of() - 1 <= isize::MAX
+        is_valid_array_layout(n, T::size_of(), T::align_of())
     ])]
     const fn array<T>(n: usize) -> Result<Layout, LayoutError>;
 }
