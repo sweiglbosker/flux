@@ -15,7 +15,7 @@
 
     // See: https://github.com/rust-lang/rust/blob/dab8d9d1066c4c95008163c7babf275106ce3f32/library/core/src/alloc/layout.rs#L559-L589
     fn is_valid_array_layout(n: int, size: int, align: int) -> bool {
-        size == 0 || is_valid_layout(size * n, align)
+        size == 0 || size * n + align - 1 <= isize::MAX
     }
 )]
 
