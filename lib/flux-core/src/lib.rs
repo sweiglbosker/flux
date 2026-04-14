@@ -32,6 +32,9 @@ mod ptr;
 #[cfg(flux)]
 mod convert;
 
+#[cfg(flux)]
+mod alloc;
+
 // -------------------------------------------------------------------
 
 #[macro_export]
