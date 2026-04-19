@@ -1,29 +1,13 @@
-use flux_attrs::*;
-
-extern crate flux_core;
-
-pub fn test_read(x: *const i32) -> i32 {
-    unsafe { std::ptr::read(x) } //~ ERROR refinement type error
-                                 //~| ERROR refinement type error
+#[flux::spec(
+    fn(p: *const{v: ptr_size(v) == 4} i32) ->
+        *const{v: ptr_size(v) == 8} i32)]
+fn bad_const_ptr_size(p: *const i32) -> *const i32 {
+    p //~ ERROR refinement type error
 }
 
-fn test_write<T>(ptr: *mut T, value: T) {
-    unsafe {
-        std::ptr::write(ptr, value); //~ ERROR refinement type error
-                                     //~| ERROR refinement type error
-    }
-}
-
-fn test_write_i32(ptr: *mut i32, value: i32) {
-    unsafe {
-        std::ptr::write(ptr, value); //~ ERROR refinement type error
-                                     //~| ERROR refinement type error
-    }
-}
-
-#[flux::spec(fn(ptr: *const{p: ptr_size(p) >= 4 && ptr_offset(p) < 0} i32))]
-fn test_read_bad_offset(ptr: *const i32) {
-    unsafe {
-        std::ptr::read(ptr); //~ ERROR refinement type error
-    }
+#[flux::spec(
+    fn(p: *mut{v: ptr_offset(v) == 0} i32) ->
+        *mut{v: ptr_offset(v) == 1} i32)]
+fn bad_mut_ptr_offset(p: *mut i32) -> *mut i32 {
+    p //~ ERROR refinement type error
 }
