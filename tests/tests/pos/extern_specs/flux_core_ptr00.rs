@@ -18,16 +18,12 @@ fn read_ix(ptr: *const i32) -> i32 {
 
 #[flux::spec(fn (ptr: *mut{v: ptr_size(v) >= 4 && valid_offset(v)} i32, value: i32))]
 fn write_i32(ptr: *mut i32, value: i32) {
-    unsafe {
-        std::ptr::write(ptr, value);
-    }
+    unsafe { std::ptr::write(ptr, value); }
 }
 
 #[flux::spec(fn (ptr: *mut{v: ptr_size(v) >= T::size_of() && valid_offset(v)} T, value: T))]
 fn write<T>(ptr: *mut T, value: T) {
-    unsafe {
-        std::ptr::write(ptr, value);
-    }
+    unsafe { std::ptr::write(ptr, value); }
 }
 
 #[flux::spec(fn (ptr: *const{v: ptr_size(v) >= 4 && ptr_offset(v) == 21} i32) -> i32)]
