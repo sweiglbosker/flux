@@ -22,10 +22,10 @@ impl<T> [T] {
     #[sig(fn(&Self[@n], mid: usize{mid <= n}) -> (&[T][mid], &[T][n - mid]))]
     fn split_at(&self, mid: usize) -> (&[T], &[T]);
 
-    #[sig(fn(&Self[@n]) -> *const{p: ptr_size(p) == n} T)]
+    #[sig(fn(&Self[@n]) -> *const{p: ptr_size(p) == n * T::size_of() && ptr_offset(p) == 0} T)]
     fn as_ptr(&self) -> *const T;
 
-    #[sig(fn(&mut Self[@n]) -> *mut{p: ptr_size(p) == n} T)]
+    #[sig(fn(&mut Self[@n]) -> *mut{p: ptr_size(p) == n * T::size_of() && ptr_offset(p) == 0} T)]
     fn as_mut_ptr(&mut self) -> *mut T;
 }
 

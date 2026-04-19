@@ -162,6 +162,8 @@ impl<'genv, 'tcx> CrateResolver<'genv, 'tcx> {
             .insert(Symbol::intern("cast"), fhir::SpecFuncKind::Cast);
         self.func_decls
             .insert(sym::ptr_size, fhir::SpecFuncKind::PtrSize);
+        self.func_decls
+            .insert(sym::ptr_offset, fhir::SpecFuncKind::PtrOffset);
     }
 
     fn define_items(&mut self, item_ids: impl IntoIterator<Item = &'tcx ItemId>) {

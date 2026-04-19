@@ -10,3 +10,8 @@ pub fn test(buf: &mut [u32; 2]) {
         std::ptr::write(ptr.add(1), 20);
     }
 }
+
+#[flux::spec(fn(buf: &mut [u32; 2]) -> *mut{p: ptr_size(p) == 8 && ptr_offset(p) == 0} u32)]
+pub fn test_as_mut_ptr_offset(buf: &mut [u32; 2]) -> *mut u32 {
+    buf.as_mut_ptr()
+}
