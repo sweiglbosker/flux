@@ -1384,7 +1384,14 @@ impl<'ck, 'genv, 'tcx, M: Mode> Checker<'ck, 'genv, 'tcx, M> {
                 let ty = self
                     .check_operand(infcx, env, stmt_span, operand)
                     .with_span(stmt_span)?;
-                Ok(Ty::array(ty, c.clone()))
+                let arr_ty = ty
+                    .with_holes()
+                    .replace_holes(|binders, kind| infcx.fresh_infer_var_for_hole(binders, kind));
+                infcx
+                    .at(stmt_span)
+                    .subtyping_with_env(env, &ty, &arr_ty, ConstrReason::Other)
+                    .with_span(stmt_span)?;
+                Ok(Ty::array(arr_ty, c.clone()))
             }
             Rvalue::Ref(r, BorrowKind::Mut { .. }, place) => {
                 env.borrow(&mut infcx.at(stmt_span), *r, Mutability::Mut, place)
