@@ -1,45 +1,29 @@
-use flux_attrs::*;
+#[flux::sig(fn(*const[@p] i32))]
+pub fn const_single(_ptr: *const i32) {}
 
-extern crate flux_core;
+#[flux::sig(fn(*mut[@p] i32))]
+pub fn mut_single(_ptr: *mut i32) {}
 
-defs! {
-    fn ptr_size(x: ptr) -> int;
-}
+#[flux::sig(fn(*const[@base, @addr, @size] i32))]
+pub fn const_parts(_ptr: *const i32) {}
 
-#[flux::spec(fn (ptr: *const {v: ptr_size(v) > 0} i32) -> i32)]
-fn read(ptr: *const i32) -> i32 {
-    unsafe { std::ptr::read(ptr) }
-}
+#[flux::sig(fn(*mut[@base, @addr, @size] i32))]
+pub fn mut_parts(_ptr: *mut i32) {}
 
-#[flux::spec(fn (ptr: *const{v: ptr_size(v) == 10} i32) -> i32)]
-fn read_ix(ptr: *const i32) -> i32 {
-    unsafe { std::ptr::read(ptr) }
-}
+#[flux::sig(fn({*const[@base, @addr, @size] i32 | size > 0}))]
+pub fn const_parts_constrained(_ptr: *const i32) {}
 
-#[flux::spec(fn (ptr: *mut{v: ptr_size(v) > 0} i32, value: i32))]
-fn write_i32(ptr: *mut i32, value: i32) {
-    unsafe {
-        std::ptr::write(ptr, value);
-    }
-}
+#[flux::sig(fn({*mut[@base, @addr, @size] i32 | size > 0}))]
+pub fn mut_parts_constrained(_ptr: *mut i32) {}
 
-#[flux::spec(fn (ptr: *mut{v: ptr_size(v) == 99} i32, value: i32))]
-fn write_ix_i32(ptr: *mut i32, value: i32) {
-    unsafe {
-        std::ptr::write(ptr, value);
-    }
-}
+#[flux::sig(fn({*const[@p] i32 | p.base == p.base && p.addr == p.addr && p.size == p.size}))]
+pub fn const_field_projections(_ptr: *const i32) {}
 
-#[flux::spec(fn (ptr: *mut{v: ptr_size(v) > 0} T, value: T))]
-fn write<T>(ptr: *mut T, value: T) {
-    unsafe {
-        std::ptr::write(ptr, value);
-    }
-}
+#[flux::sig(fn({*mut[@p] i32 | p.base == p.base && p.addr == p.addr && p.size == p.size}))]
+pub fn mut_field_projections(_ptr: *mut i32) {}
 
-#[flux::spec(fn (ptr: *mut{v: ptr_size(v) == 99} T, value: T))]
-fn write_ix<T>(ptr: *mut T, value: T) {
-    unsafe {
-        std::ptr::write(ptr, value);
-    }
-}
+#[flux::sig(fn(*const{p: p.base == p.base && p.addr == p.addr && p.size == p.size} i32))]
+pub fn const_short_field_projections(_ptr: *const i32) {}
+
+#[flux::sig(fn(*mut{p: p.base == p.base && p.addr == p.addr && p.size == p.size} i32))]
+pub fn mut_short_field_projections(_ptr: *mut i32) {}

@@ -590,8 +590,8 @@ impl WfckResultsProvider for InferCtxt<'_, '_> {
         rty::FieldProj::Tuple { arity: 0, field: 0 }
     }
 
-    fn record_ctor(&self, _: FhirId) -> DefId {
-        DefId { index: DefIndex::from_u32(0), krate: CrateNum::from_u32(0) }
+    fn record_ctor(&self, _: FhirId) -> Option<DefId> {
+        Some(DefId { index: DefIndex::from_u32(0), krate: CrateNum::from_u32(0) })
     }
 
     fn param_sort(&self, param_id: fhir::ParamId) -> rty::Sort {

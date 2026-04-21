@@ -748,8 +748,6 @@ pub enum InternalFuncKind {
     Rel(BinOp),
     // Conversions betweeen Sorts
     Cast,
-    /// Built-in UIF for pointer size: `RawPtr -> Int`
-    PtrSize,
 }
 
 #[derive(Debug, Clone, TyEncodable, TyDecodable, PartialEq, Eq, Hash)]
@@ -836,6 +834,14 @@ pub enum AggregateKind {
 pub enum FieldProj {
     Tuple { arity: usize, field: u32 },
     Adt { def_id: DefId, field: u32 },
+    RawPtr { field: RawPtrField },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, TyEncodable, TyDecodable, Debug)]
+pub enum RawPtrField {
+    Base,
+    Addr,
+    Size,
 }
 
 impl FieldProj {
@@ -845,12 +851,41 @@ impl FieldProj {
             FieldProj::Adt { def_id, .. } => {
                 Ok(genv.adt_sort_def_of(*def_id)?.struct_variant().fields())
             }
+            FieldProj::RawPtr { .. } => Ok(3),
         }
     }
 
     pub fn field_idx(&self) -> u32 {
         match self {
             FieldProj::Tuple { field, .. } | FieldProj::Adt { field, .. } => *field,
+            FieldProj::RawPtr { field } => field.index(),
+        }
+    }
+}
+
+impl RawPtrField {
+    pub fn from_name(name: Symbol) -> Option<Self> {
+        match name.as_str() {
+            "base" => Some(RawPtrField::Base),
+            "addr" => Some(RawPtrField::Addr),
+            "size" => Some(RawPtrField::Size),
+            _ => None,
+        }
+    }
+
+    pub fn index(self) -> u32 {
+        match self {
+            RawPtrField::Base => 0,
+            RawPtrField::Addr => 1,
+            RawPtrField::Size => 2,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            RawPtrField::Base => "base",
+            RawPtrField::Addr => "addr",
+            RawPtrField::Size => "size",
         }
     }
 }
@@ -1419,7 +1454,6 @@ pub(crate) mod pretty {
                 InternalFuncKind::Val(op) => w!(cx, f, "[{:?}]", op),
                 InternalFuncKind::Rel(op) => w!(cx, f, "[{:?}]?", op),
                 InternalFuncKind::Cast => w!(cx, f, "cast"),
-                InternalFuncKind::PtrSize => w!(cx, f, "ptr_size"),
             }
         }
     }
@@ -1605,6 +1639,8 @@ pub(crate) mod pretty {
             && let Some(adt_sort_def) = cx.adt_sort_def_of(def_id)
         {
             format!("{}", adt_sort_def.struct_variant().field_names()[field as usize])
+        } else if let FieldProj::RawPtr { field } = proj {
+            field.name().to_string()
         } else {
             format!("{}", proj.field_idx())
         }

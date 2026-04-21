@@ -20,7 +20,7 @@ use bitflags::bitflags;
 pub use expr::{
     AggregateKind, AliasReft, BinOp, BoundReft, Constant, Ctor, ESpan, EVid, EarlyReftParam, Expr,
     ExprKind, FieldProj, HoleKind, InternalFuncKind, KVar, KVid, Lambda, Loc, Name, NameProvenance,
-    Path, PrettyMap, PrettyVar, Real, SpecFuncKind, UnOp, Var,
+    Path, PrettyMap, PrettyVar, RawPtrField, Real, SpecFuncKind, UnOp, Var,
 };
 pub use flux_arc_interner::List;
 use flux_arc_interner::{Interned, impl_internable, impl_slice_internable};
@@ -1072,6 +1072,16 @@ impl Sort {
         Self::tuple(vec![])
     }
 
+    pub fn field_sorts(&self) -> Option<List<Sort>> {
+        match self {
+            Sort::RawPtr => Some(List::from_arr([Sort::Int, Sort::Int, Sort::Int])),
+            Sort::App(SortCtor::Adt(sort_def), args) if sort_def.is_struct() => {
+                Some(sort_def.struct_variant().field_sorts(args))
+            }
+            _ => None,
+        }
+    }
+
     #[track_caller]
     pub fn expect_func(&self) -> &PolyFuncSort {
         if let Sort::Func(sort) = self { sort } else { bug!("expected `Sort::Func`") }
@@ -1138,6 +1148,17 @@ impl Sort {
                     for (i, sort) in field_sorts.iter().enumerate() {
                         proj.push(FieldProj::Adt { def_id: sort_def.did(), field: i as u32 });
                         go(sort, f, proj);
+                        proj.pop();
+                    }
+                }
+                Sort::RawPtr => {
+                    for (field, sort) in [
+                        (RawPtrField::Base, Sort::Int),
+                        (RawPtrField::Addr, Sort::Int),
+                        (RawPtrField::Size, Sort::Int),
+                    ] {
+                        proj.push(FieldProj::RawPtr { field });
+                        go(&sort, f, proj);
                         proj.pop();
                     }
                 }
