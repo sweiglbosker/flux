@@ -750,8 +750,6 @@ pub enum InternalFuncKind {
     Cast,
     /// Built-in UIF for pointer size: `RawPtr -> Int`
     PtrSize,
-    /// Built-in UIF for pointer offset: `RawPtr -> Int`
-    PtrOffset,
 }
 
 #[derive(Debug, Clone, TyEncodable, TyDecodable, PartialEq, Eq, Hash)]
@@ -1422,7 +1420,6 @@ pub(crate) mod pretty {
                 InternalFuncKind::Rel(op) => w!(cx, f, "[{:?}]?", op),
                 InternalFuncKind::Cast => w!(cx, f, "cast"),
                 InternalFuncKind::PtrSize => w!(cx, f, "ptr_size"),
-                InternalFuncKind::PtrOffset => w!(cx, f, "ptr_offset"),
             }
         }
     }

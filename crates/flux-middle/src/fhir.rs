@@ -1269,8 +1269,6 @@ pub enum SpecFuncKind {
     Cast,
     /// Built-in function to get the size of a raw pointer's pointee type.
     PtrSize,
-    /// Built-in function to get the offset of a pointer from its original location
-    PtrOffset,
 }
 
 impl SpecFuncKind {

@@ -2435,13 +2435,6 @@ impl<'genv, 'tcx: 'genv, P: ConvPhase<'genv, 'tcx>> ConvCtxt<P> {
                 );
                 (rty::Expr::internal_func(rty::InternalFuncKind::PtrSize), rty::Sort::Func(fsort))
             }
-            fhir::Res::GlobalFunc(fhir::SpecFuncKind::PtrOffset) => {
-                let fsort = rty::PolyFuncSort::new(
-                    List::empty(),
-                    rty::FuncSort::new(vec![rty::Sort::RawPtr], rty::Sort::Int),
-                );
-                (rty::Expr::internal_func(rty::InternalFuncKind::PtrOffset), rty::Sort::Func(fsort))
-            }
             fhir::Res::GlobalFunc(fhir::SpecFuncKind::Cast) => {
                 let fsort = rty::PolyFuncSort::new(
                     List::from_arr([rty::SortParamKind::Sort, rty::SortParamKind::Sort]),

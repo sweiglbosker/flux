@@ -541,7 +541,6 @@ enum ConstKey<'tcx> {
     PrimOp(rty::BinOp),
     Cast(rty::Sort, rty::Sort),
     PtrSize,
-    PtrOffset,
 }
 
 #[derive(Clone)]
@@ -1647,11 +1646,6 @@ impl<'genv, 'tcx> ExprEncodingCtxt<'genv, 'tcx> {
                 let args = self.exprs_to_fixpoint(args, scx)?;
                 Ok(fixpoint::Expr::App(Box::new(func), None, args, None))
             }
-            InternalFuncKind::PtrOffset => {
-                let func = fixpoint::Expr::Var(self.define_const_for_ptr_offset(scx));
-                let args = self.exprs_to_fixpoint(args, scx)?;
-                Ok(fixpoint::Expr::App(Box::new(func), None, args, None))
-            }
         }
     }
 
@@ -2154,22 +2148,6 @@ impl<'genv, 'tcx> ExprEncodingCtxt<'genv, 'tcx> {
             .name
     }
 
-    fn define_const_for_ptr_offset(&mut self, scx: &mut SortEncodingCtxt) -> fixpoint::Var {
-        let key = ConstKey::PtrOffset;
-        self.const_env
-            .get_or_insert(key, |global_name| {
-                let fsort = rty::FuncSort::new(vec![rty::Sort::RawPtr], rty::Sort::Int);
-                let fsort = rty::PolyFuncSort::new(List::empty(), fsort);
-                let sort = scx.func_sort_to_fixpoint(&fsort).into_sort();
-                fixpoint::ConstDecl {
-                    name: fixpoint::Var::Const(global_name, None),
-                    sort,
-                    comment: Some("ptr_offset uif: RawPtr -> Int".to_string()),
-                }
-            })
-            .name
-    }
-
     fn define_const_for_prim_op(
         &mut self,
         op: &rty::BinOp,
@@ -2311,8 +2289,7 @@ impl<'genv, 'tcx> ExprEncodingCtxt<'genv, 'tcx> {
                 | ConstKey::Cast(..)
                 | ConstKey::Lambda(..)
                 | ConstKey::PrimOp(..)
-                | ConstKey::PtrSize
-                | ConstKey::PtrOffset => {}
+                | ConstKey::PtrSize => {}
             }
         }
         Ok(constraint)

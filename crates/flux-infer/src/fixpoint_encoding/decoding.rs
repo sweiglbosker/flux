@@ -136,9 +136,6 @@ where
                                 ConstKey::PtrSize => {
                                     Ok(rty::Expr::internal_func(InternalFuncKind::PtrSize))
                                 }
-                                ConstKey::PtrOffset => {
-                                    Ok(rty::Expr::internal_func(InternalFuncKind::PtrOffset))
-                                }
                             }
                         } else {
                             Err(FixpointParseError::NoGlobalVar(*global_var))
@@ -294,8 +291,7 @@ where
                                 }
                                 ConstKey::RustConst(..)
                                 | ConstKey::Lambda(..)
-                                | ConstKey::PtrSize
-                                | ConstKey::PtrOffset => {
+                                | ConstKey::PtrSize => {
                                     // These should be treated as a normal app.
                                     self.fixpoint_app_to_expr(fhead, fargs)
                                 }
