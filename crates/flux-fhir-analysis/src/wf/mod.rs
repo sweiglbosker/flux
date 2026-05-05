@@ -13,7 +13,7 @@ use flux_middle::{
     fhir::{self, FhirId, FluxOwnerId, visit::Visitor},
     global_env::GlobalEnv,
     queries::QueryResult,
-    rty::{self, WfckResults},
+    rty::{self, RecordCtor, WfckResults},
 };
 use rustc_errors::ErrorGuaranteed;
 use rustc_hash::FxHashSet;
@@ -590,8 +590,11 @@ impl WfckResultsProvider for InferCtxt<'_, '_> {
         rty::FieldProj::Tuple { arity: 0, field: 0 }
     }
 
-    fn record_ctor(&self, _: FhirId) -> Option<DefId> {
-        Some(DefId { index: DefIndex::from_u32(0), krate: CrateNum::from_u32(0) })
+    fn record_ctor(&self, _: FhirId) -> RecordCtor {
+        RecordCtor::Struct(DefId {
+            index: DefIndex::from_u32(0),
+            krate: CrateNum::from_u32(0),
+        })
     }
 
     fn param_sort(&self, param_id: fhir::ParamId) -> rty::Sort {

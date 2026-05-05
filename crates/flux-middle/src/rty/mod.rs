@@ -3047,13 +3047,19 @@ pub struct WfckResults {
     coercions: ItemLocalMap<Vec<Coercion>>,
     field_projs: ItemLocalMap<FieldProj>,
     node_sorts: ItemLocalMap<Sort>,
-    record_ctors: ItemLocalMap<DefId>,
+    record_ctors: ItemLocalMap<RecordCtor>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum Coercion {
     Inject(DefId),
     Project(DefId),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum RecordCtor {
+    Struct(DefId),
+    RawPtr,
 }
 
 pub type ItemLocalMap<T> = UnordMap<fhir::ItemLocalId, T>;
@@ -3131,11 +3137,11 @@ impl WfckResults {
         LocalTableInContext { owner: self.owner, data: &self.node_sorts }
     }
 
-    pub fn record_ctors_mut(&mut self) -> LocalTableInContextMut<'_, DefId> {
+    pub fn record_ctors_mut(&mut self) -> LocalTableInContextMut<'_, RecordCtor> {
         LocalTableInContextMut { owner: self.owner, data: &mut self.record_ctors }
     }
 
-    pub fn record_ctors(&self) -> LocalTableInContext<'_, DefId> {
+    pub fn record_ctors(&self) -> LocalTableInContext<'_, RecordCtor> {
         LocalTableInContext { owner: self.owner, data: &self.record_ctors }
     }
 }

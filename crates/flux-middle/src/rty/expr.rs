@@ -252,6 +252,10 @@ impl Expr {
         ExprKind::Ctor(Ctor::Struct(def_id), flds).intern()
     }
 
+    pub fn ctor_raw_ptr(flds: List<Expr>) -> Expr {
+        ExprKind::Ctor(Ctor::RawPtr, flds).intern()
+    }
+
     pub fn ctor_enum(def_id: DefId, idx: VariantIdx) -> Expr {
         ExprKind::Ctor(Ctor::Enum(def_id, idx), List::empty()).intern()
     }
@@ -597,7 +601,7 @@ impl Expr {
     /// Applies a field projection to an expression and optimistically try to beta reduce it
     pub fn proj_and_reduce(&self, proj: FieldProj) -> Expr {
         match self.kind() {
-            ExprKind::Tuple(flds) | ExprKind::Ctor(Ctor::Struct(_), flds) => {
+            ExprKind::Tuple(flds) | ExprKind::Ctor(Ctor::Struct(_) | Ctor::RawPtr, flds) => {
                 flds[proj.field_idx() as usize].clone()
             }
             _ => Expr::field_proj(self.clone(), proj),
@@ -706,12 +710,15 @@ pub enum Ctor {
     Struct(DefId),
     /// for indices represented as  `enum` in the refinement logic (e.g. using `reflected` annotations)
     Enum(DefId, VariantIdx),
+    /// for the builtin indices of raw pointers
+    RawPtr,
 }
 
 impl Ctor {
     pub fn def_id(&self) -> DefId {
         match self {
             Self::Struct(def_id) | Self::Enum(def_id, _) => *def_id,
+            Self::RawPtr => bug!("raw pointer constructor does not have a def id"),
         }
     }
 
@@ -719,11 +726,19 @@ impl Ctor {
         match self {
             Self::Struct(_) => FIRST_VARIANT,
             Self::Enum(_, variant_idx) => *variant_idx,
+            Self::RawPtr => FIRST_VARIANT,
         }
     }
 
     fn is_enum(&self) -> bool {
         matches!(self, Self::Enum(..))
+    }
+
+    pub fn opt_def_id(&self) -> Option<DefId> {
+        match self {
+            Self::Struct(def_id) | Self::Enum(def_id, _) => Some(*def_id),
+            Self::RawPtr => None,
+        }
     }
 }
 
@@ -1435,6 +1450,7 @@ pub(crate) mod pretty {
                 Ctor::Enum(def_id, variant_idx) => {
                     w!(cx, f, "{:?}::{:?}", def_id, ^variant_idx)
                 }
+                Ctor::RawPtr => w!(cx, f, "ptr"),
             }
         }
     }
@@ -1519,6 +1535,19 @@ pub(crate) mod pretty {
                     w!(cx, f, "({:?} is {:?}::{:?})", idx, def_id, ^variant_idx)
                 }
                 ExprKind::Ctor(ctor, flds) => {
+                    if matches!(ctor, Ctor::RawPtr) {
+                        let fields = iter::zip(
+                            [
+                                Symbol::intern("base"),
+                                Symbol::intern("addr"),
+                                Symbol::intern("size"),
+                            ],
+                            flds,
+                        )
+                            .map(|(name, value)| FieldBind { name, value: value.clone() })
+                            .collect_vec();
+                        return w!(cx, f, "ptr {{ {:?} }}", join!(", ", fields));
+                    }
                     let def_id = ctor.def_id();
                     if let Some(adt_sort_def) = cx.adt_sort_def_of(def_id) {
                         let variant = adt_sort_def.variant(ctor.variant_idx()).field_names();
@@ -1536,6 +1565,7 @@ pub(crate) mod pretty {
                                     w!(cx, f, "{:?}::{:?}({:?})", def_id, ^idx.index(), join!(", ", fields))
                                 }
                             }
+                            Ctor::RawPtr => unreachable!(),
                         }
                     } else {
                         match ctor {
@@ -1545,6 +1575,7 @@ pub(crate) mod pretty {
                             Ctor::Enum(_, idx) => {
                                 w!(cx, f, "{:?}::{:?} {{ {:?} }}", def_id, ^idx, join!(", ", flds))
                             }
+                            Ctor::RawPtr => unreachable!(),
                         }
                     }
                 }
@@ -1788,7 +1819,7 @@ pub(crate) mod pretty {
         flds: &[Expr],
         is_named: bool,
     ) -> Result<NestedString, fmt::Error> {
-        let def_id = ctor.def_id();
+        let def_id = ctor.opt_def_id();
         let mut text =
             if is_named && ctor.is_enum() { format_cx!(cx, "{:?}", ctor) } else { "".to_string() };
         if flds.is_empty() {
@@ -1799,13 +1830,17 @@ pub(crate) mod pretty {
             text += &flds[0].fmt_nested(cx)?.text;
             Ok(NestedString { text, children: None, key: None })
         } else {
-            let keys = if let Some(adt_sort_def) = cx.adt_sort_def_of(def_id) {
+            let keys = if let Some(def_id) = def_id
+                && let Some(adt_sort_def) = cx.adt_sort_def_of(def_id)
+            {
                 adt_sort_def
                     .variant(ctor.variant_idx())
                     .field_names()
                     .iter()
                     .map(|name| format!("{name}"))
                     .collect_vec()
+            } else if matches!(ctor, Ctor::RawPtr) {
+                vec!["base".to_string(), "addr".to_string(), "size".to_string()]
             } else {
                 (0..flds.len()).map(|i| format!("arg{i}")).collect_vec()
             };

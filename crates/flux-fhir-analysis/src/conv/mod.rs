@@ -27,7 +27,7 @@ use flux_middle::{
     query_bug,
     rty::{
         self, AssocReft, BoundReftKind, ESpan, Expr, INNERMOST, InternalFuncKind, List,
-        RefineArgsExt, WfckResults,
+        RecordCtor, RefineArgsExt, WfckResults,
         fold::TypeFoldable,
         refining::{self, Refine, Refiner},
     },
@@ -131,7 +131,7 @@ pub trait WfckResultsProvider: Sized {
 
     fn field_proj(&self, fhir_id: FhirId) -> rty::FieldProj;
 
-    fn record_ctor(&self, fhir_id: FhirId) -> Option<DefId>;
+    fn record_ctor(&self, fhir_id: FhirId) -> RecordCtor;
 
     fn param_sort(&self, param_id: fhir::ParamId) -> rty::Sort;
 
@@ -204,8 +204,11 @@ impl WfckResultsProvider for WfckResults {
             .unwrap_or_else(|| bug!("field projection without elaboration `{fhir_id:?}`"))
     }
 
-    fn record_ctor(&self, fhir_id: FhirId) -> Option<DefId> {
-        self.record_ctors().get(fhir_id).copied()
+    fn record_ctor(&self, fhir_id: FhirId) -> RecordCtor {
+        self.record_ctors()
+            .get(fhir_id)
+            .copied()
+            .unwrap_or_else(|| bug!("unelaborated record constructor `{:?}`", fhir_id))
     }
 
     fn param_sort(&self, param_id: fhir::ParamId) -> rty::Sort {
@@ -2219,10 +2222,9 @@ impl<'genv, 'tcx: 'genv, P: ConvPhase<'genv, 'tcx>> ConvCtxt<P> {
                     .iter()
                     .map(|expr| self.conv_expr(env, expr))
                     .try_collect()?;
-                if let Some(def_id) = self.results().record_ctor(expr.fhir_id) {
-                    rty::Expr::ctor_struct(def_id, flds)
-                } else {
-                    rty::Expr::tuple(flds)
+                match self.results().record_ctor(expr.fhir_id) {
+                    RecordCtor::Struct(def_id) => rty::Expr::ctor_struct(def_id, flds),
+                    RecordCtor::RawPtr => rty::Expr::ctor_raw_ptr(flds),
                 }
             }
             fhir::ExprKind::SetLiteral(elems) => {
@@ -2239,9 +2241,10 @@ impl<'genv, 'tcx: 'genv, P: ConvPhase<'genv, 'tcx>> ConvCtxt<P> {
                         _ => span_bug!(path.span, "unexpected path in constructor"),
                     }
                 } else {
-                    self.results().record_ctor(expr.fhir_id).unwrap_or_else(|| {
-                        bug!("unelaborated record constructor `{:?}`", expr.fhir_id)
-                    })
+                    match self.results().record_ctor(expr.fhir_id) {
+                        RecordCtor::Struct(def_id) => def_id,
+                        RecordCtor::RawPtr => bug!("unexpected raw pointer constructor"),
+                    }
                 };
                 let assns = self.conv_constructor_exprs(def_id, env, exprs, &spread)?;
                 rty::Expr::ctor_struct(def_id, assns)

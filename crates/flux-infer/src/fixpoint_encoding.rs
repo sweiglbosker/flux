@@ -1674,6 +1674,7 @@ impl<'genv, 'tcx> ExprEncodingCtxt<'genv, 'tcx> {
             rty::ExprKind::Ctor(rty::Ctor::Struct(did), flds) => {
                 self.struct_fields_to_fixpoint(did, flds, scx)?
             }
+            rty::ExprKind::Ctor(rty::Ctor::RawPtr, flds) => self.fields_to_fixpoint(flds, scx)?,
             rty::ExprKind::IsCtor(def_id, variant_idx, e) => {
                 let ctor = self.variant_to_fixpoint(scx, def_id, *variant_idx);
                 let e = self.expr_to_fixpoint(e, scx)?;

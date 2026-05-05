@@ -10,7 +10,7 @@ use flux_middle::{
     global_env::GlobalEnv,
     queries::QueryResult,
     rty::{
-        self, AdtSortDef, FuncSort, List, WfckResults,
+        self, AdtSortDef, FuncSort, List, RecordCtor, WfckResults,
         fold::{FallibleTypeFolder, TypeFoldable, TypeFolder, TypeSuperFoldable},
     },
 };
@@ -155,7 +155,7 @@ impl<'genv, 'tcx> InferCtxt<'genv, 'tcx> {
         if let rty::Sort::App(rty::SortCtor::Adt(sort_def), sort_args) = &expected {
             self.wfckresults
                 .record_ctors_mut()
-                .insert(expr.fhir_id, sort_def.did());
+                .insert(expr.fhir_id, RecordCtor::Struct(sort_def.did()));
             self.check_field_exprs(expr.span, sort_def, sort_args, field_exprs, spread, &expected)?;
             Ok(())
         } else {
@@ -181,7 +181,11 @@ impl<'genv, 'tcx> InferCtxt<'genv, 'tcx> {
             if let rty::Sort::App(rty::SortCtor::Adt(sort_def), _) = expected {
                 self.wfckresults
                     .record_ctors_mut()
-                    .insert(arg.fhir_id, sort_def.did());
+                    .insert(arg.fhir_id, RecordCtor::Struct(sort_def.did()));
+            } else if matches!(expected, rty::Sort::RawPtr) {
+                self.wfckresults
+                    .record_ctors_mut()
+                    .insert(arg.fhir_id, RecordCtor::RawPtr);
             }
 
             izip!(flds, &sorts)
