@@ -1119,10 +1119,7 @@ impl<'a, E: LocEnv> Sub<'a, E> {
                     self.idxs_eq(infcx, a, b);
                 }
             }
-            (
-                ExprKind::Ctor(Ctor::RawPtr, flds_a),
-                ExprKind::Ctor(Ctor::RawPtr, flds_b),
-            ) => {
+            (ExprKind::Ctor(Ctor::RawPtr, flds_a), ExprKind::Ctor(Ctor::RawPtr, flds_b)) => {
                 for (a, b) in iter::zip(flds_a, flds_b) {
                     self.idxs_eq(infcx, a, b);
                 }

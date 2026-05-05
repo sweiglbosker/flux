@@ -1544,8 +1544,8 @@ pub(crate) mod pretty {
                             ],
                             flds,
                         )
-                            .map(|(name, value)| FieldBind { name, value: value.clone() })
-                            .collect_vec();
+                        .map(|(name, value)| FieldBind { name, value: value.clone() })
+                        .collect_vec();
                         return w!(cx, f, "ptr {{ {:?} }}", join!(", ", fields));
                     }
                     let def_id = ctor.def_id();

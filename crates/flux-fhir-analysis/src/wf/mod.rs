@@ -591,10 +591,7 @@ impl WfckResultsProvider for InferCtxt<'_, '_> {
     }
 
     fn record_ctor(&self, _: FhirId) -> RecordCtor {
-        RecordCtor::Struct(DefId {
-            index: DefIndex::from_u32(0),
-            krate: CrateNum::from_u32(0),
-        })
+        RecordCtor::Struct(DefId { index: DefIndex::from_u32(0), krate: CrateNum::from_u32(0) })
     }
 
     fn param_sort(&self, param_id: fhir::ParamId) -> rty::Sort {
