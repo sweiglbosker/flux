@@ -820,6 +820,16 @@ fn normalize_alias_reft<'tcx>(
 ) -> QueryResult<(bool, Expr)> {
     let tcx = genv.tcx();
 
+    // All impls of `MetaSized` are builtin, so we skip trait selection (see
+    // `GlobalEnv::meta_sized_assoc_reft_body`).
+    if genv.is_meta_sized_assoc_reft(alias_reft.assoc_id) {
+        let typing_env = infcx.typing_env(tcx.param_env(def_id));
+        return match genv.meta_sized_assoc_reft_body(typing_env, alias_reft) {
+            Some(body) => Ok((true, body.apply(refine_args))),
+            None => Ok((false, Expr::alias(alias_reft.clone(), refine_args.clone()))),
+        };
+    }
+
     let is_final = genv.assoc_refinement(alias_reft.assoc_id)?.final_;
     if is_final {
         let e = genv

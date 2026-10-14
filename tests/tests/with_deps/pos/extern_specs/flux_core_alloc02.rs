@@ -21,10 +21,10 @@ defs! {
 // 1. Prove it — restate the postcondition on the impl method. `Slab` hands out its whole
 //    block and nothing smaller, so it can only serve a request for exactly `self.len`
 //    bytes, which is what makes the block exactly `layout.size()` long.
-#[flux::refined_by(base: int, addr: int, size: int)]
+#[flux::refined_by(base: int, addr: int, size: int, meta: int)]
 #[flux::invariant(base == addr && size >= 0)]
 struct Slab {
-    #[flux::field(NonNull<u8>[base, addr, size])]
+    #[flux::field(NonNull<u8>[base, addr, size, meta])]
     block: NonNull<u8>,
     #[flux::field(usize[size])]
     len: usize,
