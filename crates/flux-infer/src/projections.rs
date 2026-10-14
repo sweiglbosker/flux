@@ -808,6 +808,21 @@ pub fn structurally_normalize_expr<'tcx>(
     }
 }
 
+fn builtin_assoc_reft_body<'tcx>(
+    genv: GlobalEnv<'_, 'tcx>,
+    def_id: DefId,
+    infcx: &rustc_infer::infer::InferCtxt<'tcx>,
+    param_env: rustc_middle::ty::ParamEnv<'tcx>,
+    alias_reft: &AliasReft,
+    refine_args: &RefineArgs,
+) -> QueryResult<(bool, Expr)> {
+    let refiner = Refiner::default_for_item(genv, def_id)?;
+    match genv.builtin_assoc_reft_body(infcx.typing_env(param_env), &refiner, alias_reft)? {
+        Some(body) => Ok((true, body.apply(refine_args))),
+        None => Ok((false, Expr::alias(alias_reft.clone(), refine_args.clone()))),
+    }
+}
+
 /// Normalizes an [`AliasReft`]. This uses the trait solver to find the [`ImplSourceUserDefinedData`]
 /// and uses the `args` there, which we map back to Flux via refining. This loses refinements,
 /// but that's fine because [`AliasReft`] should not rely on refinements for trait solving.
@@ -819,16 +834,6 @@ fn normalize_alias_reft<'tcx>(
     refine_args: &RefineArgs,
 ) -> QueryResult<(bool, Expr)> {
     let tcx = genv.tcx();
-
-    // All impls of `MetaSized` are builtin, so we skip trait selection (see
-    // `GlobalEnv::meta_sized_assoc_reft_body`).
-    if genv.is_meta_sized_assoc_reft(alias_reft.assoc_id) {
-        let typing_env = infcx.typing_env(tcx.param_env(def_id));
-        return match genv.meta_sized_assoc_reft_body(typing_env, alias_reft) {
-            Some(body) => Ok((true, body.apply(refine_args))),
-            None => Ok((false, Expr::alias(alias_reft.clone(), refine_args.clone()))),
-        };
-    }
 
     let is_final = genv.assoc_refinement(alias_reft.assoc_id)?.final_;
     if is_final {
@@ -869,11 +874,13 @@ fn normalize_alias_reft<'tcx>(
                 .apply(refine_args);
             Ok((true, e))
         }
-        Some(ImplSource::Builtin(BuiltinImplSource::Misc | BuiltinImplSource::Trivial, _))
-            if let Some(body) =
-                genv.builtin_assoc_reft_body(infcx.typing_env(param_env), alias_reft) =>
-        {
-            Ok((true, body.apply(refine_args)))
+        Some(ImplSource::Builtin(BuiltinImplSource::Misc | BuiltinImplSource::Trivial, _)) => {
+            builtin_assoc_reft_body(genv, def_id, infcx, param_env, alias_reft, refine_args)
+        }
+        // A type parameter `T: Sized` satisfies `T: MetaSized` through the param env, but we can
+        // still unfold `MetaSized`'s refinements to the ones of `Sized`.
+        Some(ImplSource::Param(..)) if genv.is_meta_sized_assoc_reft(alias_reft.assoc_id) => {
+            builtin_assoc_reft_body(genv, def_id, infcx, param_env, alias_reft, refine_args)
         }
         _ => Ok((false, Expr::alias(alias_reft.clone(), refine_args.clone()))),
     }

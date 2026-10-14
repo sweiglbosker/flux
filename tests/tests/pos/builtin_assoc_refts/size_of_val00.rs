@@ -37,6 +37,17 @@ fn test_dst() {
     requires_layout::<Packet>(9, 24, 8);
 }
 
+// Nested unsized tail: `Packet` starts at offset 8.
+struct Outer {
+    flag: u8,
+    packet: Packet,
+}
+
+fn test_nested_dst() {
+    requires_layout::<Outer>(0, 16, 8);
+    requires_layout::<Outer>(1, 24, 8);
+}
+
 // Generic `T: Sized`: `size_of_val` agrees with `size_of`.
 #[spec(fn(m: usize) ensures T::size_of_val(m) == T::size_of() && T::align_of_val(m) == T::align_of())]
 fn sized_generic<T>(_m: usize) {}

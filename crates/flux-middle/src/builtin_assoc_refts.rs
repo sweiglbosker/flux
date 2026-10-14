@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use flux_arc_interner::List;
 use flux_common::bug;
+use flux_rustc_bridge::lowering::Lower as _;
 use flux_syntax::symbols::sym;
 use rustc_attr_ir::LangItem;
 use rustc_data_structures::unord::UnordMap;
@@ -12,7 +13,11 @@ use rustc_span::{DUMMY_SP, Symbol};
 use crate::{
     def_id::FluxDefId,
     global_env::GlobalEnv,
-    rty::{self, AliasReft, AssocRefinements, AssocReft, BaseTy, BinOp, Expr, GenericArg, Sort},
+    queries::QueryResult,
+    query_bug,
+    rty::{
+        self, AliasReft, AssocRefinements, AssocReft, BaseTy, BinOp, Expr, Sort, refining::Refiner,
+    },
 };
 
 impl<'tcx> GlobalEnv<'_, 'tcx> {
@@ -155,31 +160,43 @@ impl<'tcx> GlobalEnv<'_, 'tcx> {
             .unwrap_or_else(|| bug!("missing builtin assoc reft `{name}` for `{def_id:?}`"))
     }
 
-    /// Returns the body of a builtin associated refinement, or `None` if it cannot be computed
-    /// yet, e.g., `size_of` for a type like `W<T>` whose layout depends on a generic parameter.
-    /// In that case the caller should leave the alias unnormalized.
+    /// The body of a builtin associated refinement for a builtin impl, or `None` if it cannot be
+    /// computed and the alias must stay uninterpreted.
+    ///
+    /// For `MetaSized`, this is also called when the impl comes from the param env, because a type
+    /// parameter `T: Sized` has `T: MetaSized` as an elaborated bound. In that case, the alias is
+    /// rewritten to the corresponding `Sized` alias.
     pub fn builtin_assoc_reft_body(
         self,
-        typing_env: rustc_middle::ty::TypingEnv<'tcx>,
+        typing_env: TypingEnv<'tcx>,
+        refiner: &Refiner<'_, 'tcx>,
         alias_reft: &AliasReft,
-    ) -> Option<rty::Lambda> {
+    ) -> QueryResult<Option<rty::Lambda>> {
         let tcx = self.tcx();
+        let trait_id = alias_reft.assoc_id.parent();
+        let name = alias_reft.assoc_id.name();
 
-        if tcx.is_lang_item(alias_reft.assoc_id.parent(), LangItem::Sized) {
+        let lambda = if tcx.is_lang_item(trait_id, LangItem::Sized) {
             let self_ty = alias_reft.to_rustc_trait_ref(tcx).self_ty();
             // A type can be `Sized` via a builtin impl and still have a layout that depends on
             // generic parameters (`W<T>`, `[T; 2]`, ...), so `layout_of` may fail with
             // `TooGeneric`. Leaving the alias abstract is always sound.
-            let layout = tcx.layout_of(typing_env.as_query_input(self_ty)).ok()?;
-            let body = match alias_reft.assoc_id.name() {
-                sym::size_of => rty::Expr::constant(rty::Constant::from(layout.size.bytes())),
-                sym::align_of => rty::Expr::constant(rty::Constant::from(layout.align.abi.bytes())),
+            let Ok(layout) = tcx.layout_of(typing_env.as_query_input(self_ty)) else {
+                return Ok(None);
+            };
+            let body = match name {
+                sym::size_of => Expr::constant(rty::Constant::from(layout.size.bytes())),
+                sym::align_of => Expr::constant(rty::Constant::from(layout.align.abi.bytes())),
                 _ => bug!("invalid builtin assoc reft {:?}", alias_reft.assoc_id),
             };
-            Some(rty::Lambda::bind_with_vars(body, List::empty(), rty::Sort::Int))
-        } else if tcx.is_lang_item(alias_reft.assoc_id.parent(), LangItem::FnOnce)
-            && alias_reft.assoc_id.name() == sym::no_panic
-        {
+            rty::Lambda::bind_with_vars(body, List::empty(), Sort::Int)
+        } else if tcx.is_lang_item(trait_id, LangItem::MetaSized) {
+            let self_ty = alias_reft.to_rustc_trait_ref(tcx).self_ty();
+            let Some(body) = self.meta_sized_body(typing_env, refiner, name, self_ty)? else {
+                return Ok(None);
+            };
+            rty::Lambda::bind_with_fsort(body, rty::FuncSort::new(vec![Sort::Int], Sort::Int))
+        } else if tcx.is_lang_item(trait_id, LangItem::FnOnce) && name == sym::no_panic {
             let self_ty = alias_reft.self_ty();
             let body = match self_ty.as_bty_skipping_binder() {
                 BaseTy::Closure(_, _, _, no_panic) => {
@@ -191,10 +208,11 @@ impl<'tcx> GlobalEnv<'_, 'tcx> {
                 }
                 _ => rty::Expr::ff(),
             };
-            Some(rty::Lambda::bind_with_vars(body, List::empty(), rty::Sort::Bool))
+            rty::Lambda::bind_with_vars(body, List::empty(), Sort::Bool)
         } else {
             bug!("invalid builtin assoc reft {:?}", alias_reft.assoc_id)
-        }
+        };
+        Ok(Some(lambda))
     }
 
     /// Whether `assoc_id` is one of the builtin associated refinements of `MetaSized`.
@@ -203,172 +221,108 @@ impl<'tcx> GlobalEnv<'_, 'tcx> {
             .is_lang_item(assoc_id.parent(), LangItem::MetaSized)
     }
 
-    /// The body of `MetaSized::size_of_val` / `MetaSized::align_of_val` for the self type of
-    /// `alias_reft`, or `None` if the alias cannot be normalized and must stay uninterpreted
-    /// (e.g., `dyn Trait`, or a generic `T: ?Sized`).
-    ///
-    /// All impls of `MetaSized` are builtin, so unlike other associated refinements we don't go
-    /// through trait selection. This lets us normalize the alias for a type parameter `T` with a
-    /// `T: Sized` bound to `T::size_of()`, which selection would leave as a param-env candidate.
-    ///
-    /// The single argument is the pointer metadata: unused for sized types, the length for slices
+    /// The body of `MetaSized::size_of_val` / `MetaSized::align_of_val` for `self_ty`, in terms of
+    /// the pointer metadata `meta` (bound variable 0): unused for sized types, the length for slices
     /// and `str`, and the vtable pointer for `dyn Trait`.
-    pub fn meta_sized_assoc_reft_body(
+    fn meta_sized_body(
         self,
         typing_env: TypingEnv<'tcx>,
-        alias_reft: &AliasReft,
-    ) -> Option<rty::Lambda> {
+        refiner: &Refiner<'_, 'tcx>,
+        name: Symbol,
+        self_ty: rustc_ty::Ty<'tcx>,
+    ) -> QueryResult<Option<Expr>> {
         let tcx = self.tcx();
-        let name = alias_reft.assoc_id.name();
         let is_size = match name {
             sym::size_of_val => true,
             sym::align_of_val => false,
-            _ => bug!("invalid builtin assoc reft {:?}", alias_reft.assoc_id),
+            _ => bug!("invalid builtin assoc reft `{name}` for `MetaSized`"),
         };
-        let self_ty = alias_reft.to_rustc_trait_ref(tcx).self_ty();
+        let sized = |ty| self.builtin_alias(refiner, LangItem::Sized, ty, List::empty());
         let meta = Expr::nu();
 
-        let body = if self_ty.is_sized(tcx, typing_env) {
-            // The metadata is `()`, so the argument is ignored.
-            if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(self_ty)) {
-                let n = if is_size { layout.size.bytes() } else { layout.align.abi.bytes() };
-                Expr::constant(rty::Constant::from(n))
-            } else {
-                let ctor = meta_sized_self_bty(&alias_reft.args[0])?.to_subset_ty_ctor();
-                let name = if is_size { sym::size_of } else { sym::align_of };
-                self.sized_alias(name, ctor)
+        // Sized types ignore the metadata
+        if self_ty.is_sized(tcx, typing_env) {
+            let name = if is_size { sym::size_of } else { sym::align_of };
+            return Ok(Some(sized(self_ty)?(name)));
+        }
+
+        let body = match self_ty.kind() {
+            rustc_ty::Slice(elem) if is_size => {
+                Expr::binary_op(BinOp::Mul(Sort::Int), meta, sized(*elem)?(sym::size_of))
             }
-        } else {
-            match meta_sized_self_bty(&alias_reft.args[0]) {
-                Some(BaseTy::Slice(elem_ty)) => {
-                    let ctor = elem_ty.as_bty_skipping_existentials()?.to_subset_ty_ctor();
-                    if is_size {
-                        Expr::binary_op(
-                            BinOp::Mul(Sort::Int),
-                            meta,
-                            self.sized_alias(sym::size_of, ctor),
-                        )
-                    } else {
-                        self.sized_alias(sym::align_of, ctor)
-                    }
+            rustc_ty::Slice(elem) => sized(*elem)?(sym::align_of),
+            rustc_ty::Str if is_size => meta,
+            rustc_ty::Str => Expr::constant(rty::Constant::from(1u64)),
+            // A struct (or tuple) whose last field is unsized has size
+            // `round_up(offset_of_tail + size_of_val(tail), align)`. The offset of a `dyn Trait`
+            // tail depends on its dynamic alignment, so we only handle slice and `str` tails, for
+            // which the layout of the struct is static.
+            rustc_ty::Adt(..) | rustc_ty::Tuple(..) => {
+                let tail = tcx.struct_tail_for_codegen(self_ty, typing_env);
+                if !matches!(tail.kind(), rustc_ty::Slice(_) | rustc_ty::Str) {
+                    return Ok(None);
                 }
-                Some(BaseTy::Str) => {
-                    if is_size {
-                        meta
-                    } else {
-                        Expr::constant(rty::Constant::from(1u64))
-                    }
+                let Ok(layout) = tcx.layout_of(typing_env.as_query_input(self_ty)) else {
+                    return Ok(None);
+                };
+                let align = layout.align.abi.bytes();
+                if !is_size {
+                    return Ok(Some(Expr::constant(rty::Constant::from(align))));
                 }
-                // Structs and tuples with an unsized tail, `dyn Trait`, generic `T: ?Sized`, ...
-                _ => {
-                    if is_size {
-                        concrete_dst_size(tcx, typing_env, self_ty, &meta)?
-                    } else {
-                        Expr::constant(rty::Constant::from(concrete_dst_align(
-                            tcx, typing_env, self_ty,
-                        )?))
-                    }
-                }
+                let Some(last_field) = last_field_ty(tcx, typing_env, self_ty) else {
+                    return Ok(None);
+                };
+                let offset = layout.fields.offset(layout.fields.count() - 1).bytes();
+                let tail_size = self.builtin_alias(
+                    refiner,
+                    LangItem::MetaSized,
+                    last_field,
+                    List::singleton(meta),
+                )?(sym::size_of_val);
+                round_up(
+                    Expr::binary_op(
+                        BinOp::Add(Sort::Int),
+                        Expr::constant(rty::Constant::from(offset)),
+                        tail_size,
+                    ),
+                    align,
+                )
             }
+            // `dyn Trait`, a type parameter `T: ?Sized`, ...
+            _ => return Ok(None),
         };
-        Some(rty::Lambda::bind_with_fsort(body, rty::FuncSort::new(vec![Sort::Int], Sort::Int)))
+        Ok(Some(body))
     }
 
-    /// `<ctor as Sized>::name()`
-    fn sized_alias(self, name: Symbol, ctor: rty::SubsetTyCtor) -> Expr {
-        let sized_id = self.tcx().require_lang_item(LangItem::Sized, DUMMY_SP);
-        Expr::alias(
-            AliasReft {
-                assoc_id: self.require_builtin_assoc_reft(sized_id, name),
-                args: List::from_arr([GenericArg::Base(ctor)]),
-            },
-            List::empty(),
-        )
+    /// Returns a function building `<ty as Trait>::name(args)` for the builtin `Trait`.
+    fn builtin_alias(
+        self,
+        refiner: &Refiner<'_, 'tcx>,
+        lang_item: LangItem,
+        ty: rustc_ty::Ty<'tcx>,
+        refine_args: List<Expr>,
+    ) -> QueryResult<impl Fn(Symbol) -> Expr> {
+        let tcx = self.tcx();
+        let trait_id = tcx.require_lang_item(lang_item, DUMMY_SP);
+        let args = tcx
+            .mk_args(&[ty.into()])
+            .lower(tcx)
+            .map_err(|reason| query_bug!(trait_id, "{reason:?}"))?;
+        let args = refiner.refine_generic_args(trait_id, &args)?;
+        Ok(move |name| {
+            let assoc_id = self.require_builtin_assoc_reft(trait_id, name);
+            Expr::alias(AliasReft { assoc_id, args: args.clone() }, refine_args.clone())
+        })
     }
 }
 
-/// The base type of the self argument of a `MetaSized` alias. `MetaSized` refines its self
-/// parameter as a `Type` (see `generics_of`), but we also accept a `Base` argument.
-fn meta_sized_self_bty(arg: &GenericArg) -> Option<&BaseTy> {
-    match arg {
-        GenericArg::Ty(ty) => ty.as_bty_skipping_existentials(),
-        GenericArg::Base(ctor) => Some(ctor.as_bty_skipping_binder()),
-        _ => None,
-    }
-}
-
-/// The size of an unsized type whose layout is fully known, as a function of its metadata `meta`.
-/// This mirrors `size_and_align_of_dst` in rustc's codegen: a struct (or tuple) with an unsized
-/// tail has size `round_up(offset_of_tail + size_of_val(tail), align)`. Returns `None` if some part
-/// of the type is not concrete or the tail is a `dyn Trait`.
-fn concrete_dst_size<'tcx>(
+/// The type of the last field of a struct or tuple.
+fn last_field_ty<'tcx>(
     tcx: rustc_ty::TyCtxt<'tcx>,
     typing_env: TypingEnv<'tcx>,
     ty: rustc_ty::Ty<'tcx>,
-    meta: &Expr,
-) -> Option<Expr> {
+) -> Option<rustc_ty::Ty<'tcx>> {
     match ty.kind() {
-        rustc_ty::Slice(elem) => {
-            let elem_size = tcx
-                .layout_of(typing_env.as_query_input(*elem))
-                .ok()?
-                .size
-                .bytes();
-            Some(Expr::binary_op(
-                BinOp::Mul(Sort::Int),
-                meta.clone(),
-                Expr::constant(rty::Constant::from(elem_size)),
-            ))
-        }
-        rustc_ty::Str => Some(meta.clone()),
-        rustc_ty::Adt(..) | rustc_ty::Tuple(..) => {
-            let (tail_ty, tail_offset) = unsized_tail(tcx, typing_env, ty)?;
-            let align = concrete_dst_align(tcx, typing_env, ty)?;
-            let unrounded = Expr::binary_op(
-                BinOp::Add(Sort::Int),
-                Expr::constant(rty::Constant::from(tail_offset)),
-                concrete_dst_size(tcx, typing_env, tail_ty, meta)?,
-            );
-            Some(round_up(unrounded, align))
-        }
-        _ => None,
-    }
-}
-
-/// The alignment of an unsized type whose layout is fully known. See [`concrete_dst_size`].
-fn concrete_dst_align<'tcx>(
-    tcx: rustc_ty::TyCtxt<'tcx>,
-    typing_env: TypingEnv<'tcx>,
-    ty: rustc_ty::Ty<'tcx>,
-) -> Option<u64> {
-    let align = match ty.kind() {
-        rustc_ty::Slice(elem) => {
-            tcx.layout_of(typing_env.as_query_input(*elem))
-                .ok()?
-                .align
-                .abi
-                .bytes()
-        }
-        rustc_ty::Str => 1,
-        rustc_ty::Adt(..) | rustc_ty::Tuple(..) => {
-            let (tail_ty, _) = unsized_tail(tcx, typing_env, ty)?;
-            let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
-            // The alignment of the sized prefix combined with the alignment of the tail.
-            let tail_align = concrete_dst_align(tcx, typing_env, tail_ty)?;
-            u64::max(layout.align.abi.bytes(), tail_align)
-        }
-        _ => return None,
-    };
-    Some(align)
-}
-
-/// The last field of a struct or tuple, which must be the unsized one, together with its offset.
-fn unsized_tail<'tcx>(
-    tcx: rustc_ty::TyCtxt<'tcx>,
-    typing_env: TypingEnv<'tcx>,
-    ty: rustc_ty::Ty<'tcx>,
-) -> Option<(rustc_ty::Ty<'tcx>, u64)> {
-    let tail_ty = match ty.kind() {
         rustc_ty::Adt(adt_def, args) if adt_def.is_struct() => {
             let field_ty = adt_def
                 .non_enum_variant()
@@ -376,18 +330,14 @@ fn unsized_tail<'tcx>(
                 .iter()
                 .last()?
                 .ty(tcx, args);
-            tcx.try_normalize_erasing_regions(typing_env, field_ty)
-                .ok()?
+            tcx.try_normalize_erasing_regions(typing_env, field_ty).ok()
         }
-        rustc_ty::Tuple(tys) => *tys.last()?,
-        _ => return None,
-    };
-    let layout = tcx.layout_of(typing_env.as_query_input(ty)).ok()?;
-    let last = layout.fields.count().checked_sub(1)?;
-    Some((tail_ty, layout.fields.offset(last).bytes()))
+        rustc_ty::Tuple(tys) => tys.last().copied(),
+        _ => None,
+    }
 }
 
-/// `round_up(e, align)`, where `align` is a constant.
+/// `round_up(e, align)` for a constant `align`.
 fn round_up(e: Expr, align: u64) -> Expr {
     if align == 1 {
         return e;
