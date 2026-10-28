@@ -14,7 +14,7 @@ use flux_rustc_bridge::lowering::Lower as _;
 use flux_syntax::symbols::sym;
 use rustc_attr_ir::LangItem;
 use rustc_hir::def_id::DefId;
-use rustc_middle::ty::{self as rustc_ty, TypingEnv};
+use rustc_middle::ty::{self as rustc_ty, TypingEnv, layout::LayoutCx};
 use rustc_span::{DUMMY_SP, Symbol};
 
 use crate::{
@@ -127,7 +127,7 @@ impl<'tcx> GlobalEnv<'_, 'tcx> {
     pub fn builtin_assoc_refts(self, def_id: DefId) -> Option<AssocRefinements> {
         let tcx = self.tcx();
         let trait_ = tcx.as_lang_item(def_id)?;
-        let items: Vec<_> = BUILTIN_ASSOC_REFTS
+        let items: List<_> = BUILTIN_ASSOC_REFTS
             .iter()
             .filter(|reft| reft.trait_ == trait_)
             .map(|reft| {
@@ -137,7 +137,7 @@ impl<'tcx> GlobalEnv<'_, 'tcx> {
         if items.is_empty() {
             return None;
         }
-        Some(AssocRefinements { items: List::from_vec(items) })
+        Some(AssocRefinements { items })
     }
 
     pub fn builtin_assoc_reft_sort(
@@ -173,17 +173,14 @@ impl<'tcx> GlobalEnv<'_, 'tcx> {
         let Some(reft) = self.lookup_builtin_assoc_reft(alias_reft.assoc_id) else {
             return Ok(BuiltinAssocReftBody::Select);
         };
-        let cx = BodyCx { genv: self, typing_env, item };
+        let refiner = Refiner::default_for_item(self, item)?;
+        let cx = BodyCx { genv: self, typing_env, refiner };
         let body = match (reft.body)(&cx, alias_reft)? {
             Some(body) => {
                 BuiltinAssocReftBody::Body(rty::Lambda::bind_with_fsort(body, reft.fsort()))
             }
-            None => {
-                match reft.fallback {
-                    Fallback::Opaque => BuiltinAssocReftBody::Opaque,
-                    Fallback::Select => BuiltinAssocReftBody::Select,
-                }
-            }
+            None if let Fallback::Opaque = reft.fallback => BuiltinAssocReftBody::Opaque,
+            None => BuiltinAssocReftBody::Select,
         };
         Ok(body)
     }
@@ -206,7 +203,7 @@ impl<'tcx> GlobalEnv<'_, 'tcx> {
 struct BodyCx<'genv, 'tcx> {
     genv: GlobalEnv<'genv, 'tcx>,
     typing_env: TypingEnv<'tcx>,
-    item: DefId,
+    refiner: Refiner<'genv, 'tcx>,
 }
 
 impl<'tcx> BodyCx<'_, 'tcx> {
@@ -232,8 +229,7 @@ impl<'tcx> BodyCx<'_, 'tcx> {
             .mk_args(&[ty.into()])
             .lower(tcx)
             .map_err(|reason| query_bug!(trait_id, "{reason:?}"))?;
-        let args = Refiner::default_for_item(self.genv, self.item)?
-            .refine_generic_args(trait_id, &args)?;
+        let args = self.refiner.refine_generic_args(trait_id, &args)?;
         Ok(self.genv.builtin_alias(trait_, name, args, refine_args))
     }
 
@@ -298,8 +294,11 @@ fn meta_sized_size_of_val(cx: &BodyCx, alias_reft: &AliasReft) -> QueryResult<Op
         rustc_ty::Str => meta,
         rustc_ty::Adt(..) | rustc_ty::Tuple(..) => {
             let Some(layout) = dst_layout(cx, self_ty) else { return Ok(None) };
-            let Some(tail) = last_field_ty(cx, self_ty) else { return Ok(None) };
-            let offset = layout.fields.offset(layout.fields.count() - 1).bytes();
+            let tail_idx = layout.fields.count() - 1;
+            let offset = layout.fields.offset(tail_idx).bytes();
+            let tail = layout
+                .field(&LayoutCx::new(cx.tcx(), cx.typing_env), tail_idx)
+                .ty;
             let tail_size =
                 cx.alias(LangItem::MetaSized, sym::size_of_val, tail, List::singleton(meta))?;
             let size = Expr::binary_op(BinOp::Add(Sort::Int), int(offset), tail_size);
@@ -343,23 +342,6 @@ fn dst_layout<'tcx>(
         return None;
     }
     cx.layout(ty)
-}
-
-/// The type of the last field of a struct or tuple.
-fn last_field_ty<'tcx>(
-    cx: &BodyCx<'_, 'tcx>,
-    ty: rustc_ty::Ty<'tcx>,
-) -> Option<rustc_ty::Ty<'tcx>> {
-    let tcx = cx.tcx();
-    match ty.kind() {
-        rustc_ty::Adt(adt_def, args) if adt_def.is_struct() => {
-            let field = adt_def.non_enum_variant().fields.iter().last()?;
-            tcx.try_normalize_erasing_regions(cx.typing_env, field.ty(tcx, args))
-                .ok()
-        }
-        rustc_ty::Tuple(tys) => tys.last().copied(),
-        _ => None,
-    }
 }
 
 fn int(n: u64) -> Expr {
