@@ -2,6 +2,7 @@ use std::iter;
 
 use flux_common::{bug, iter::IterExt, tracked_span_bug};
 use flux_middle::{
+    builtin_assoc_refts::BuiltinAssocReftBody,
     global_env::GlobalEnv,
     queries::{QueryErr, QueryResult},
     query_bug,
@@ -17,7 +18,7 @@ use flux_middle::{
 use flux_rustc_bridge::{ToRustc, lowering::Lower};
 use itertools::izip;
 use rustc_hir::def_id::DefId;
-use rustc_infer::traits::{BuiltinImplSource, Obligation};
+use rustc_infer::traits::Obligation;
 use rustc_middle::{
     traits::{ImplSource, ObligationCause},
     ty::{TyCtxt, Variance},
@@ -808,21 +809,6 @@ pub fn structurally_normalize_expr<'tcx>(
     }
 }
 
-fn builtin_assoc_reft_body<'tcx>(
-    genv: GlobalEnv<'_, 'tcx>,
-    def_id: DefId,
-    infcx: &rustc_infer::infer::InferCtxt<'tcx>,
-    param_env: rustc_middle::ty::ParamEnv<'tcx>,
-    alias_reft: &AliasReft,
-    refine_args: &RefineArgs,
-) -> QueryResult<(bool, Expr)> {
-    let refiner = Refiner::default_for_item(genv, def_id)?;
-    match genv.builtin_assoc_reft_body(infcx.typing_env(param_env), &refiner, alias_reft)? {
-        Some(body) => Ok((true, body.apply(refine_args))),
-        None => Ok((false, Expr::alias(alias_reft.clone(), refine_args.clone()))),
-    }
-}
-
 /// Normalizes an [`AliasReft`]. This uses the trait solver to find the [`ImplSourceUserDefinedData`]
 /// and uses the `args` there, which we map back to Flux via refining. This loses refinements,
 /// but that's fine because [`AliasReft`] should not rely on refinements for trait solving.
@@ -847,9 +833,20 @@ fn normalize_alias_reft<'tcx>(
         return Ok((true, e));
     }
 
+    let param_env = tcx.param_env(def_id);
+
+    // The bodies of builtin associated refinements are determined by the structure of the type,
+    // so they don't need selection in most cases.
+    match genv.builtin_assoc_reft_body(def_id, infcx.typing_env(param_env), alias_reft)? {
+        BuiltinAssocReftBody::Body(body) => return Ok((true, body.apply(refine_args))),
+        BuiltinAssocReftBody::Opaque => {
+            return Ok((false, Expr::alias(alias_reft.clone(), refine_args.clone())));
+        }
+        BuiltinAssocReftBody::Select => {}
+    }
+
     // Get impl source
     let mut selcx = SelectionContext::new(infcx);
-    let param_env = tcx.param_env(def_id);
     let trait_ref = alias_reft.to_rustc_trait_ref(tcx);
     let trait_ref = tcx.erase_and_anonymize_regions(trait_ref);
     let trait_pred = Obligation::new(tcx, ObligationCause::dummy(), param_env, trait_ref);
@@ -873,14 +870,6 @@ fn normalize_alias_reft<'tcx>(
                 .instantiate(tcx, &args, &[])
                 .apply(refine_args);
             Ok((true, e))
-        }
-        Some(ImplSource::Builtin(BuiltinImplSource::Misc | BuiltinImplSource::Trivial, _)) => {
-            builtin_assoc_reft_body(genv, def_id, infcx, param_env, alias_reft, refine_args)
-        }
-        // A type parameter `T: Sized` satisfies `T: MetaSized` through the param env, but we can
-        // still unfold `MetaSized`'s refinements to the ones of `Sized`.
-        Some(ImplSource::Param(..)) if genv.is_meta_sized_assoc_reft(alias_reft.assoc_id) => {
-            builtin_assoc_reft_body(genv, def_id, infcx, param_env, alias_reft, refine_args)
         }
         _ => Ok((false, Expr::alias(alias_reft.clone(), refine_args.clone()))),
     }

@@ -1,3 +1,5 @@
+#![feature(extern_types)]
+
 extern crate flux_core;
 
 use std::ptr::NonNull;
@@ -21,6 +23,20 @@ pub fn test_slice_misaligned(nn: NonNull<[u32]>) -> &'static [u32] {
     requires addr >= base && size >= 1000)]
 pub fn test_unsized_generic<T: ?Sized>(nn: NonNull<T>) -> &'static T {
     // Both the size and the alignment conditions fail.
+    unsafe {
+        nn.as_ref() //~ ERROR refinement type
+                    //~| ERROR refinement type
+    }
+}
+
+unsafe extern "C" {
+    pub type Opaque;
+}
+
+// Extern types are not `MetaSized`, so their size and alignment are opaque.
+#[flux::spec(fn (nn: NonNull<Opaque>[@base, @addr, @size, @_meta]) -> &Opaque
+    requires addr >= base && size >= 1000)]
+pub fn test_extern_type(nn: NonNull<Opaque>) -> &'static Opaque {
     unsafe {
         nn.as_ref() //~ ERROR refinement type
                     //~| ERROR refinement type

@@ -8,9 +8,9 @@ use core::{
 };
 
 // A block as `allocate`/`grow`/`shrink` return it: at the start of its own allocation,
-// tracked as exactly `size` bytes long, and aligned to `align`.
-#[flux::spec(fn(NonNull<[u8]>[@base, @addr, @size, @_meta1], usize[@lsize], usize[@lalign])
-    requires base == addr && lsize == size && addr % lalign == 0)]
+// tracked as exactly `size` bytes long (also as its slice length), and aligned to `align`.
+#[flux::spec(fn(NonNull<[u8]>[@base, @addr, @size, @meta], usize[@lsize], usize[@lalign])
+    requires base == addr && lsize == size && meta == lsize && addr % lalign == 0)]
 fn check_block(_block: NonNull<[u8]>, _size: usize, _align: usize) {}
 
 // --- allocate ---
@@ -27,6 +27,16 @@ pub fn test_allocate_of<A: Allocator>(a: &A) {
     if let Ok(block) = a.allocate(layout) {
         check_block(block, size_of::<u64>(), align_of::<u64>());
     }
+}
+
+// The length of the returned slice pointer is the requested size, so the block can be viewed as a
+// slice.
+#[flux::spec(fn(&A) -> Option<usize[16]>)]
+pub fn test_allocate_len<A: Allocator>(a: &A) -> Option<usize> {
+    let layout = Layout::from_size_align(16, 8).unwrap();
+    let block = a.allocate(layout).ok()?;
+    let _bytes: &[u8] = unsafe { block.as_ref() };
+    Some(block.len())
 }
 
 // A zero-sized layout still yields a block at the start of an allocation.

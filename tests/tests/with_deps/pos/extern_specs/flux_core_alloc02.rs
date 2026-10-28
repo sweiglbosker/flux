@@ -11,7 +11,7 @@ use flux_rs::defs;
 
 // Import the predicate rather than copying its body, which would go stale.
 defs! {
-    use flux_core::alloc::allocator::layout_fits;
+    use flux_core::alloc::allocator::allocated_block;
 }
 
 // The trait's postcondition on `allocate` is an obligation on every impl, so an impl that
@@ -34,7 +34,7 @@ struct Slab {
 
 unsafe impl Allocator for Slab {
     #[flux::spec(fn(&Self, layout: Layout[@l])
-        -> Result<NonNull<[u8]>{p: layout_fits(p, l)}, AllocError>)]
+        -> Result<NonNull<[u8]>{p: allocated_block(p, l)}, AllocError>)]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         // Both guards are load-bearing: dropping either leaves a conjunct unprovable.
         if layout.size() != self.len {
@@ -51,7 +51,7 @@ unsafe impl Allocator for Slab {
 
 // 2. Assume it — `#[flux::trusted_impl]` skips the impl-vs-trait check, taking the
 //    implementor at their word. This is the escape hatch for an allocator that cannot state
-//    its block sizes precisely enough to prove `layout_fits`. Plain `#[flux::trusted]` does
+//    its block sizes precisely enough to prove `allocated_block`. Plain `#[flux::trusted]` does
 //    NOT work: the obligation is on the signature, not the body.
 struct Trusted;
 
